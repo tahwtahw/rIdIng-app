@@ -1,8 +1,11 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
+import '../../api_client.dart';
 import '../../config.dart';
+import '../../services/auth_service.dart';
+import '../../services/language_service.dart';
 import '../../services/user_service.dart';
+import '../../widgets/login_dialog.dart';
 import 'album_detail_screen.dart';
 import '../community/room_photos_screen.dart';
 
@@ -13,11 +16,9 @@ class GalleryScreen extends StatefulWidget {
 }
 
 class _GalleryScreenState extends State<GalleryScreen> {
-  List<dynamic> _albums = [];
   List<dynamic> _visibleAlbums = [];
   List<dynamic> _rooms = [];
   String _username = '';
-  List<String> _joinedRoomIds = ['public'];
   bool _loading = true;
   String? _error;
 
@@ -34,8 +35,8 @@ class _GalleryScreenState extends State<GalleryScreen> {
       final joinedIds = await UserService.getJoinedRooms();
 
       final results = await Future.wait([
-        http.get(Uri.parse('${Config.baseUrl}/albums')),
-        http.get(Uri.parse('${Config.baseUrl}/rooms')),
+        ApiClient.get(Uri.parse('${Config.baseUrl}/albums')),
+        ApiClient.get(Uri.parse('${Config.baseUrl}/rooms')),
       ]);
 
       final allAlbums = jsonDecode(results[0].body) as List;
@@ -51,11 +52,9 @@ class _GalleryScreenState extends State<GalleryScreen> {
       }).toList();
 
       setState(() {
-        _albums = allAlbums;
         _visibleAlbums = visible;
         _rooms = allRooms.where((r) => joinedIds.contains(r['id'])).toList();
         _username = name;
-        _joinedRoomIds = joinedIds;
         _loading = false;
       });
     } catch (e) {
@@ -68,37 +67,64 @@ class _GalleryScreenState extends State<GalleryScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('刪除相簿'),
-        content: Text('確定要刪除「${album['title'] ?? ''}」及其所有照片嗎？'),
+        title: Text(LanguageService.t('delete')),
+        content: Text(LanguageService.tp(
+            'del_confirm', {'x': '${album['title'] ?? ''}'})),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('取消')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text(LanguageService.t('cancel'))),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('刪除'),
+            child: Text(LanguageService.t('delete')),
           ),
         ],
       ),
     );
     if (confirmed != true) return;
     try {
-      await http.delete(Uri.parse('${Config.baseUrl}/albums/${album['id']}'));
+      await ApiClient.delete(Uri.parse('${Config.baseUrl}/albums/${album['id']}'));
       await _load();
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('相簿已刪除')));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(LanguageService.t('album_deleted'))));
     } catch (e) {
       debugPrint('錯誤：$e');
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('刪除失敗：$e')));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${LanguageService.t('delete_fail')}：$e')));
     }
   }
 
   void _openAlbum(Map album) {
+    final visibility = album['visibility'] ?? 'public';
+    final roomId = (album['room_id'] ?? '').toString();
+    // 僅限聊天室的相簿：直接開啟該聊天室的照片庫，
+    // 與聊天室內「相簿」分頁完全同步（同一份內容）
+    if (visibility == 'room' && roomId.isNotEmpty) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => Scaffold(
+            appBar: AppBar(title: Text(album['title'] ?? LanguageService.t('room_album'))),
+            body: RoomPhotosScreen(roomId: roomId, isPublic: false),
+          ),
+        ),
+      ).then((_) => _load());
+      return;
+    }
     Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => AlbumDetailScreen(album: album)),
     ).then((_) => _load());
   }
 
-  void _showCreateDialog() {
+  void _showCreateDialog() async {
+    if (!AuthService.isLoggedIn) {
+      final ok = await LoginDialog.show(context);
+      if (!ok || !mounted) return;
+    }
+    // 先重新載入已加入的聊天室，
+    // 避免在社群頁加入聊天室後，這裡仍是啟動時的舊資料而無法選擇
+    await _load();
+    if (!mounted) return;
     showDialog(
       context: context,
       builder: (_) => _CreateAlbumDialog(
@@ -123,7 +149,7 @@ class _GalleryScreenState extends State<GalleryScreen> {
     String? roomId,
   }) async {
     try {
-      await http.post(
+      await ApiClient.post(
         Uri.parse('${Config.baseUrl}/albums'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
@@ -139,14 +165,15 @@ class _GalleryScreenState extends State<GalleryScreen> {
       await _load();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('相簿已建立')),
+          SnackBar(content: Text(LanguageService.t('album_created'))),
         );
       }
     } catch (e) {
       debugPrint('錯誤：$e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('建立失敗：$e')),
+          SnackBar(
+              content: Text('${LanguageService.t('msg_create_fail')}: $e')),
         );
       }
     }
@@ -156,7 +183,7 @@ class _GalleryScreenState extends State<GalleryScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('相簿'),
+        title: Text(LanguageService.t('nav_gallery')),
         actions: [
           IconButton(icon: const Icon(Icons.refresh), onPressed: _load),
         ],
@@ -170,12 +197,15 @@ class _GalleryScreenState extends State<GalleryScreen> {
                     const SizedBox(height: 12),
                     Text(_error!, style: const TextStyle(color: Colors.grey)),
                     const SizedBox(height: 16),
-                    FilledButton(onPressed: _load, child: const Text('重試')),
+                    FilledButton(onPressed: _load, child: Text(LanguageService.t('retry'))),
                   ]),
                 )
               : RefreshIndicator(
                       onRefresh: _load,
-                      child: CustomScrollView(
+                      child: Center(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 900),
+                          child: CustomScrollView(
                         slivers: [
                           // 公開聊天室相簿（固定置頂）
                           SliverToBoxAdapter(
@@ -186,7 +216,9 @@ class _GalleryScreenState extends State<GalleryScreen> {
                                   context,
                                   MaterialPageRoute(
                                     builder: (_) => Scaffold(
-                                      appBar: AppBar(title: const Text('公開聊天室相簿')),
+                                      appBar: AppBar(
+                                          title: Text(LanguageService.t(
+                                              'public_room_album'))),
                                       body: const RoomPhotosScreen(
                                           roomId: 'public', isPublic: true),
                                     ),
@@ -213,8 +245,8 @@ class _GalleryScreenState extends State<GalleryScreen> {
                                   childCount: _visibleAlbums.length,
                                 ),
                                 gridDelegate:
-                                    const SliverGridDelegateWithFixedCrossAxisCount(
-                                  crossAxisCount: 2,
+                                    SliverGridDelegateWithMaxCrossAxisExtent(
+                                  maxCrossAxisExtent: 220,
                                   crossAxisSpacing: 10,
                                   mainAxisSpacing: 10,
                                   childAspectRatio: 0.85,
@@ -229,24 +261,29 @@ class _GalleryScreenState extends State<GalleryScreen> {
                                   const Icon(Icons.photo_album,
                                       size: 48, color: Colors.grey),
                                   const SizedBox(height: 12),
-                                  const Text('還沒有個人相簿',
-                                      style: TextStyle(color: Colors.grey)),
+                                  Text(
+                                      LanguageService.t(
+                                          'no_personal_albums'),
+                                      style: const TextStyle(
+                                          color: Colors.grey)),
                                   const SizedBox(height: 16),
                                   FilledButton.icon(
                                     onPressed: _showCreateDialog,
                                     icon: const Icon(Icons.add),
-                                    label: const Text('建立相簿'),
+                                    label: Text(LanguageService.t('new_album')),
                                   ),
                                 ]),
                               ),
                             ),
                         ],
                       ),
+                        ),
+                      ),
                     ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _showCreateDialog,
         icon: const Icon(Icons.create_new_folder),
-        label: const Text('新增相簿'),
+        label: Text(LanguageService.t('new_album')),
       ),
     );
   }
@@ -310,9 +347,9 @@ class _VisibilitySelector extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Row(children: [
-      _option(context, 'private', Icons.lock, '僅個人可見'),
-      _option(context, 'room', Icons.people, '僅限聊天室'),
-      _option(context, 'public', Icons.public, '公開可見'),
+      _option(context, 'private', Icons.lock, LanguageService.t('vis_private')),
+      _option(context, 'room', Icons.people, LanguageService.t('vis_room')),
+      _option(context, 'public', Icons.public, LanguageService.t('vis_public')),
     ]);
   }
 }
@@ -370,7 +407,7 @@ class _AlbumCard extends StatelessWidget {
                     Icons.photo_library,
                     size: 52,
                     color: theme.colorScheme.onPrimaryContainer
-                        .withOpacity(0.4),
+                        .withValues(alpha: 0.4),
                   ),
                 ),
                 Positioned(
@@ -379,7 +416,7 @@ class _AlbumCard extends StatelessWidget {
                   child: Container(
                     padding: const EdgeInsets.all(4),
                     decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.85),
+                      color: Colors.white.withValues(alpha: 0.85),
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Icon(visIcon, size: 16, color: visColor),
@@ -392,7 +429,7 @@ class _AlbumCard extends StatelessWidget {
                     child: Container(
                       padding: const EdgeInsets.all(3),
                       decoration: BoxDecoration(
-                        color: Colors.black.withOpacity(0.45),
+                        color: Colors.black.withValues(alpha: 0.45),
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: const Icon(Icons.delete_outline,
@@ -466,13 +503,13 @@ class _PublicRoomAlbumCard extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('公開聊天室相簿',
+                  Text(LanguageService.t('public_room_album'),
                       style: theme.textTheme.titleMedium?.copyWith(
                           color: Colors.white,
                           fontWeight: FontWeight.bold)),
-                  Text('與公開聊天室即時同步',
+                  Text(LanguageService.t('public_album_sync'),
                       style: TextStyle(
-                          color: Colors.white.withOpacity(0.85),
+                          color: Colors.white.withValues(alpha: 0.85),
                           fontSize: 12)),
                 ],
               ),
@@ -514,13 +551,14 @@ class _CreateAlbumDialogState extends State<_CreateAlbumDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('新增相簿'),
+      title: Text(LanguageService.t('new_album')),
       content: SingleChildScrollView(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           TextField(
             controller: _titleCtrl,
-            decoration: const InputDecoration(
-                labelText: '相簿名稱 *', border: OutlineInputBorder()),
+            decoration: InputDecoration(
+                labelText: '${LanguageService.t('album_name')} *',
+                border: const OutlineInputBorder()),
             autofocus: true,
           ),
           const SizedBox(height: 12),
@@ -535,12 +573,13 @@ class _CreateAlbumDialogState extends State<_CreateAlbumDialog> {
               if (d != null) setState(() => _date = d);
             },
             child: InputDecorator(
-              decoration: const InputDecoration(
-                  labelText: '日期', border: OutlineInputBorder()),
+              decoration: InputDecoration(
+                  labelText: LanguageService.t('f_date'),
+                  border: const OutlineInputBorder()),
               child: Text(
                 _date == null
-                    ? '點擊選擇日期'
-                    : '${_date!.year}/${_date!.month.toString().padLeft(2,'0')}/${_date!.day.toString().padLeft(2,'0')}',
+                    ? LanguageService.t('pick_date_tap')
+                    : '${_date!.year}/${_date!.month.toString().padLeft(2, "0")}/${_date!.day.toString().padLeft(2, "0")}',
                 style: TextStyle(color: _date == null ? Colors.grey : Colors.black),
               ),
             ),
@@ -548,13 +587,15 @@ class _CreateAlbumDialogState extends State<_CreateAlbumDialog> {
           const SizedBox(height: 12),
           TextField(
             controller: _locationCtrl,
-            decoration: const InputDecoration(
-                labelText: '地點', border: OutlineInputBorder()),
+            decoration: InputDecoration(
+                labelText: LanguageService.t('f_loc'),
+                border: const OutlineInputBorder()),
           ),
           const SizedBox(height: 16),
-          const Align(
+          Align(
             alignment: Alignment.centerLeft,
-            child: Text('可見範圍', style: TextStyle(fontSize: 13, color: Colors.grey)),
+            child: Text(LanguageService.t('visibility'),
+                style: const TextStyle(fontSize: 13, color: Colors.grey)),
           ),
           const SizedBox(height: 6),
           _VisibilitySelector(
@@ -567,14 +608,15 @@ class _CreateAlbumDialogState extends State<_CreateAlbumDialog> {
           if (_visibility == 'room') ...[
             const SizedBox(height: 12),
             if (widget.rooms.isEmpty)
-              const Text('尚未加入任何私人聊天室',
-                  style: TextStyle(color: Colors.red, fontSize: 13))
+              Text(LanguageService.t('msg_no_rooms'),
+                  style: const TextStyle(color: Colors.red, fontSize: 13))
             else
               DropdownButtonFormField<String>(
                 value: _roomId,
-                decoration: const InputDecoration(
-                    labelText: '選擇聊天室', border: OutlineInputBorder()),
-                hint: const Text('選擇私人聊天室'),
+                decoration: InputDecoration(
+                    labelText: LanguageService.t('choose_room'),
+                    border: const OutlineInputBorder()),
+                hint: Text(LanguageService.t('choose_private_room')),
                 items: widget.rooms
                     .map<DropdownMenuItem<String>>((r) => DropdownMenuItem(
                           value: r['id'] as String,
@@ -589,15 +631,15 @@ class _CreateAlbumDialogState extends State<_CreateAlbumDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text('取消'),
+          child: Text(LanguageService.t('cancel')),
         ),
         FilledButton(
           onPressed: () async {
             final title = _titleCtrl.text.trim();
             if (title.isEmpty) return;
             if (_visibility == 'room' && _roomId == null) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('請選擇聊天室')));
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                  content: Text(LanguageService.t('msg_pick_room'))));
               return;
             }
             Navigator.pop(context);
@@ -605,13 +647,13 @@ class _CreateAlbumDialogState extends State<_CreateAlbumDialog> {
               title,
               _date == null
                   ? ''
-                  : '${_date!.year}-${_date!.month.toString().padLeft(2,'0')}-${_date!.day.toString().padLeft(2,'0')}',
-              _locationCtrl.text.trim(),
+                  : '${_date!.year}-${_date!.month.toString().padLeft(2, "0")}-${_date!.day.toString().padLeft(2, "0")}',
+              _locationCtrl.text,
               _visibility,
               _roomId,
             );
           },
-          child: const Text('建立'),
+          child: Text(LanguageService.t('create')),
         ),
       ],
     );

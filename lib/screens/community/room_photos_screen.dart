@@ -1,10 +1,24 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import '../../api_client.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../config.dart';
+import '../../services/auth_service.dart';
+import '../../services/language_service.dart';
 import '../../services/user_service.dart';
 import '../../utils/photo_actions.dart';
+import '../../widgets/login_dialog.dart';
+
+Color _heartColor(int likes) {
+  if (likes <= 50)   return const Color(0xFFFFCDD2);
+  if (likes <= 150)  return const Color(0xFFEF9A9A);
+  if (likes <= 350)  return const Color(0xFFE57373);
+  if (likes <= 750)  return const Color(0xFFF44336);
+  if (likes <= 1250) return const Color(0xFFE53935);
+  if (likes <= 2000) return const Color(0xFFC62828);
+  return const Color(0xFFB71C1C);
+}
 
 class RoomPhotosScreen extends StatefulWidget {
   final String roomId;
@@ -41,7 +55,7 @@ class _RoomPhotosScreenState extends State<RoomPhotosScreen> {
   Future<void> _load() async {
     setState(() { _loading = true; _error = null; });
     try {
-      final r = await http.get(
+      final r = await ApiClient.get(
         Uri.parse('${Config.baseUrl}/rooms/${widget.roomId}/photos'),
       );
       setState(() {
@@ -50,18 +64,26 @@ class _RoomPhotosScreenState extends State<RoomPhotosScreen> {
       });
     } catch (e) {
       debugPrint('錯誤：$e');
-      setState(() { _error = '錯誤：$e'; _loading = false; });
+      setState(() {
+        _error = '${LanguageService.t('error')}: $e';
+        _loading = false;
+      });
     }
   }
 
   Future<void> _like(String photoId) async {
     try {
-      await http.post(Uri.parse('${Config.baseUrl}/photos/$photoId/like'));
+      await ApiClient.post(Uri.parse('${Config.baseUrl}/photos/$photoId/like'));
       await _load();
     } catch (e) { debugPrint('錯誤：$e'); }
   }
 
   Future<void> _pickAndUpload() async {
+    if (!AuthService.isLoggedIn) {
+      final ok = await LoginDialog.show(context);
+      if (!ok || !mounted) return;
+    }
+
     final picker = ImagePicker();
     final picked = await picker.pickImage(
       source: ImageSource.gallery,
@@ -74,6 +96,7 @@ class _RoomPhotosScreenState extends State<RoomPhotosScreen> {
 
     final uri = Uri.parse('${Config.baseUrl}/rooms/${widget.roomId}/photos');
     final request = http.MultipartRequest('POST', uri);
+    request.headers.addAll(AuthService.authHeader);
     request.fields['sender'] = _username;
     request.fields['caption'] = caption ?? '';
 
@@ -93,7 +116,7 @@ class _RoomPhotosScreenState extends State<RoomPhotosScreen> {
         await _load();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('照片上傳成功')),
+            SnackBar(content: Text(LanguageService.t('photo_uploaded'))),
           );
         }
       } else {
@@ -103,7 +126,8 @@ class _RoomPhotosScreenState extends State<RoomPhotosScreen> {
       debugPrint('錯誤：$e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('上傳失敗：$e')),
+          SnackBar(
+              content: Text('${LanguageService.t('msg_upload_fail')}: $e')),
         );
       }
     }
@@ -114,20 +138,21 @@ class _RoomPhotosScreenState extends State<RoomPhotosScreen> {
     return showDialog<String>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('新增說明'),
+        title: Text(LanguageService.t('add_caption')),
         content: TextField(
           controller: ctrl,
-          decoration: const InputDecoration(hintText: '照片說明（可略）'),
+          decoration:
+              InputDecoration(hintText: LanguageService.t('caption_opt')),
           autofocus: true,
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, ''),
-            child: const Text('略過'),
+            child: Text(LanguageService.t('skip')),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, ctrl.text.trim()),
-            child: const Text('確認'),
+            child: Text(LanguageService.t('confirm')),
           ),
         ],
       ),
@@ -147,7 +172,9 @@ class _RoomPhotosScreenState extends State<RoomPhotosScreen> {
                     const SizedBox(height: 12),
                     Text(_error!, style: const TextStyle(color: Colors.grey)),
                     const SizedBox(height: 16),
-                    FilledButton(onPressed: _load, child: const Text('重試')),
+                    FilledButton(
+                        onPressed: _load,
+                        child: Text(LanguageService.t('retry'))),
                   ]),
                 )
               : _photos.isEmpty
@@ -156,14 +183,16 @@ class _RoomPhotosScreenState extends State<RoomPhotosScreen> {
                         const Icon(Icons.photo_library_outlined,
                             size: 64, color: Colors.grey),
                         const SizedBox(height: 12),
-                        const Text('還沒有照片',
-                            style: TextStyle(color: Colors.grey, fontSize: 16)),
+                        Text(LanguageService.t('no_photos'),
+                            style: const TextStyle(
+                                color: Colors.grey, fontSize: 16)),
                         if (widget.roomId != 'public') ...[
                           const SizedBox(height: 16),
                           FilledButton.icon(
                             onPressed: _pickAndUpload,
                             icon: const Icon(Icons.add_photo_alternate),
-                            label: const Text('新增第一張照片'),
+                            label:
+                                Text(LanguageService.t('add_first_photo')),
                           ),
                         ],
                       ]),
@@ -201,17 +230,19 @@ class _RoomPhotosScreenState extends State<RoomPhotosScreen> {
 
   Future<void> _deletePhoto(String photoId) async {
     try {
-      await http.delete(Uri.parse('${Config.baseUrl}/photos/$photoId'));
+      await ApiClient.delete(Uri.parse('${Config.baseUrl}/photos/$photoId'));
       await _load();
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('照片已刪除')));
+            .showSnackBar(
+                SnackBar(content: Text(LanguageService.t('photo_deleted'))));
       }
     } catch (e) {
       debugPrint('錯誤：$e');
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('刪除失敗：$e')));
+            .showSnackBar(SnackBar(
+                content: Text('${LanguageService.t('del_fail')}: $e')));
       }
     }
   }
@@ -241,9 +272,10 @@ class _RoomPhotosScreenState extends State<RoomPhotosScreen> {
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   child: Row(children: [
-                    Icon(Icons.favorite, color: Colors.red.shade400, size: 18),
+                    Icon(Icons.favorite, color: _heartColor((photo['likes'] ?? 0) as int), size: 18),
                     const SizedBox(width: 4),
-                    Text('${photo['likes'] ?? 0} 個讚'),
+                    Text(LanguageService.tp(
+                        'likes_count', {'n': '${photo['likes'] ?? 0}'})),
                     const Spacer(),
                     Text(photo['sender'] ?? '',
                         style: TextStyle(
@@ -258,7 +290,7 @@ class _RoomPhotosScreenState extends State<RoomPhotosScreen> {
                           url: photo['url'] ?? '',
                           caption: photo['caption'] ?? '');
                     },
-                    child: const Text('分享'),
+                    child: Text(LanguageService.t('share')),
                   ),
                   if (isMine)
                     TextButton(
@@ -267,11 +299,11 @@ class _RoomPhotosScreenState extends State<RoomPhotosScreen> {
                         Navigator.pop(context);
                         await _deletePhoto(photo['id'].toString());
                       },
-                      child: const Text('刪除'),
+                      child: Text(LanguageService.t('delete')),
                     ),
                   TextButton(
                     onPressed: () => Navigator.pop(context),
-                    child: const Text('關閉'),
+                    child: Text(LanguageService.t('close')),
                   ),
                 ]),
               ]),
@@ -314,7 +346,7 @@ class _PhotoCard extends StatelessWidget {
                   begin: Alignment.bottomCenter,
                   end: Alignment.topCenter,
                   colors: [
-                    Colors.black.withOpacity(0.6),
+                    Colors.black.withValues(alpha: 0.6),
                     Colors.transparent,
                   ],
                 ),
@@ -335,8 +367,8 @@ class _PhotoCard extends StatelessWidget {
                 GestureDetector(
                   onTap: onLike,
                   child: Row(children: [
-                    const Icon(Icons.favorite,
-                        color: Colors.red, size: 16),
+                    Icon(Icons.favorite,
+                        color: _heartColor((photo['likes'] ?? 0) as int), size: 16),
                     const SizedBox(width: 2),
                     Text(
                       '${photo['likes'] ?? 0}',

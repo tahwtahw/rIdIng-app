@@ -1,7 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:http/http.dart' as http;
+import '../api_client.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import '../config.dart';
@@ -16,7 +16,7 @@ String fullImageUrl(String url) {
 /// 下載圖片到暫存資料夾，回傳 File
 Future<File?> _downloadToTemp(String url) async {
   try {
-    final resp = await http.get(Uri.parse(fullImageUrl(url)));
+    final resp = await ApiClient.get(Uri.parse(fullImageUrl(url)));
     if (resp.statusCode != 200) return null;
     final dir = await getTemporaryDirectory();
     final name = url.split('/').last.isNotEmpty

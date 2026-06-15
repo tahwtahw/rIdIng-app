@@ -1,7 +1,8 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
+import '../../api_client.dart';
 import '../../config.dart';
+import '../../services/language_service.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -25,8 +26,8 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() { _loading = true; _error = null; });
     try {
       final responses = await Future.wait([
-        http.get(Uri.parse('${Config.baseUrl}/events')),
-        http.get(Uri.parse('${Config.baseUrl}/outings')),
+        ApiClient.get(Uri.parse('${Config.baseUrl}/events')),
+        ApiClient.get(Uri.parse('${Config.baseUrl}/outings')),
       ]);
       setState(() {
         _events = jsonDecode(responses[0].body);
@@ -35,7 +36,10 @@ class _HomeScreenState extends State<HomeScreen> {
       });
     } catch (e) {
       debugPrint('錯誤：$e');
-      setState(() { _error = '錯誤：$e'; _loading = false; });
+      setState(() {
+        _error = '${LanguageService.t('error')}: $e';
+        _loading = false;
+      });
     }
   }
 
@@ -55,7 +59,9 @@ class _HomeScreenState extends State<HomeScreen> {
                   const SizedBox(height: 12),
                   Text(_error!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.grey)),
                   const SizedBox(height: 16),
-                  FilledButton(onPressed: _load, child: const Text('重試')),
+                  FilledButton(
+                      onPressed: _load,
+                      child: Text(LanguageService.t('retry'))),
                 ]))
               : RefreshIndicator(
                   onRefresh: _load,
@@ -76,18 +82,32 @@ class _HomeScreenState extends State<HomeScreen> {
                             const Icon(Icons.pedal_bike, color: Colors.white, size: 48),
                             const SizedBox(width: 16),
                             Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                              Text('歡迎回來！', style: theme.textTheme.titleLarge?.copyWith(color: Colors.white)),
-                              Text('${_outings.length} 個揪團進行中', style: TextStyle(color: Colors.white.withOpacity(0.9))),
+                              Text(LanguageService.t('welcome_back'),
+                                  style: theme.textTheme.titleLarge
+                                      ?.copyWith(color: Colors.white)),
+                              Text(
+                                  LanguageService.tp('events_ongoing',
+                                      {'n': '${_outings.length}'}),
+                                  style: TextStyle(
+                                      color: Colors.white
+                                          .withValues(alpha: 0.9))),
                             ]),
                           ]),
                         ),
                       ),
                       const SizedBox(height: 16),
                       // Upcoming events
-                      Text('近期活動', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+                      Text(LanguageService.t('recent_events'),
+                          style: theme.textTheme.titleMedium
+                              ?.copyWith(fontWeight: FontWeight.bold)),
                       const SizedBox(height: 8),
                       if (_events.isEmpty)
-                        const Card(child: ListTile(title: Text('目前沒有活動', style: TextStyle(color: Colors.grey))))
+                        Card(
+                            child: ListTile(
+                                title: Text(
+                                    LanguageService.t('no_events_now'),
+                                    style: const TextStyle(
+                                        color: Colors.grey))))
                       else
                         ..._events.take(3).map((e) => Card(
                           margin: const EdgeInsets.only(bottom: 8),
@@ -96,15 +116,26 @@ class _HomeScreenState extends State<HomeScreen> {
                             title: Text(e['title'] ?? ''),
                             subtitle: Text('${e['date'] ?? ''} · ${e['location'] ?? ''}'),
                             trailing: e['is_regular'] == 1
-                                ? const Chip(label: Text('固定', style: TextStyle(fontSize: 11)))
+                                ? Chip(
+                                    label: Text(
+                                        LanguageService.t('fixed_tag'),
+                                        style: const TextStyle(
+                                            fontSize: 11)))
                                 : null,
                           ),
                         )),
                       const SizedBox(height: 16),
-                      Text('最新活動', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+                      Text(LanguageService.t('latest_events'),
+                          style: theme.textTheme.titleMedium
+                              ?.copyWith(fontWeight: FontWeight.bold)),
                       const SizedBox(height: 8),
                       if (_outings.isEmpty)
-                        const Card(child: ListTile(title: Text('目前沒有行程', style: TextStyle(color: Colors.grey))))
+                        Card(
+                            child: ListTile(
+                                title: Text(
+                                    LanguageService.t('no_outings_now'),
+                                    style: const TextStyle(
+                                        color: Colors.grey))))
                       else
                         ..._outings.take(3).map((o) => Card(
                           margin: const EdgeInsets.only(bottom: 8),
@@ -112,8 +143,10 @@ class _HomeScreenState extends State<HomeScreen> {
                             leading: const Icon(Icons.group, color: Colors.orange),
                             title: Text(o['title'] ?? ''),
                             subtitle: Text('${o['date'] ?? ''} · ${o['location'] ?? ''}'),
-                            trailing: Text('${o['joined']}/${o['capacity']}人',
-                                style: const TextStyle(fontWeight: FontWeight.bold)),
+                            trailing: Text(
+                                '${o['joined']}/${o['capacity']} ${LanguageService.t('ppl')}',
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.bold)),
                           ),
                         )),
                     ],

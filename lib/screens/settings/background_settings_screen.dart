@@ -1,8 +1,11 @@
+import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import '../../services/background_service.dart';
+import '../../services/language_service.dart';
 
 // 預設色票
 const _kSwatches = <Color>[
@@ -48,24 +51,33 @@ class _BackgroundSettingsScreenState extends State<BackgroundSettingsScreen> {
     final picker = ImagePicker();
     final picked = await picker.pickImage(
       source: ImageSource.gallery,
-      imageQuality: 85,
+      imageQuality: kIsWeb ? 80 : 85,
+      // web 需縮圖，避免 base64 超過 localStorage 容量上限
+      maxWidth: kIsWeb ? 1280 : null,
+      maxHeight: kIsWeb ? 1280 : null,
     );
     if (picked == null) return;
-    // 複製到 app 文件目錄以確保永久存取
-    final dir  = await getApplicationDocumentsDirectory();
-    final dest = File('${dir.path}/bg_custom.jpg');
-    await dest.writeAsBytes(await picked.readAsBytes());
-    await BackgroundService.setImage(dest.path);
+    if (kIsWeb) {
+      // web 無檔案系統，改存 base64 影像資料
+      final bytes = await picked.readAsBytes();
+      await BackgroundService.setImageData(base64Encode(bytes));
+    } else {
+      // 複製到 app 文件目錄以確保永久存取
+      final dir  = await getApplicationDocumentsDirectory();
+      final dest = File('${dir.path}/bg_custom.jpg');
+      await dest.writeAsBytes(await picked.readAsBytes());
+      await BackgroundService.setImage(dest.path);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
-      appBar: AppBar(title: const Text('背景設定')),
+      appBar: AppBar(title: Text(LanguageService.t('bg_settings'))),
       body: ListView(padding: const EdgeInsets.all(16), children: [
         // ── 目前預覽 ────────────────────────────────────────────────
-        Text('目前背景', style: theme.textTheme.titleSmall),
+        Text(LanguageService.t('current_bg'), style: theme.textTheme.titleSmall),
         const SizedBox(height: 8),
         Container(
           height: 120,
@@ -82,12 +94,13 @@ class _BackgroundSettingsScreenState extends State<BackgroundSettingsScreen> {
         OutlinedButton.icon(
           onPressed: BackgroundService.reset,
           icon: const Icon(Icons.refresh),
-          label: const Text('重設為預設背景'),
+          label: Text(LanguageService.t('reset_default')),
         ),
         const Divider(height: 32),
 
         // ── 選擇純色 ─────────────────────────────────────────────────
-        Text('純色背景', style: theme.textTheme.titleSmall),
+        Text(LanguageService.t('solid_bg'),
+            style: theme.textTheme.titleSmall),
         const SizedBox(height: 10),
         Wrap(
           spacing: 10,
@@ -107,7 +120,7 @@ class _BackgroundSettingsScreenState extends State<BackgroundSettingsScreen> {
                       ? Border.all(color: theme.colorScheme.primary, width: 3)
                       : Border.all(color: Colors.grey.shade300),
                   boxShadow: selected
-                      ? [BoxShadow(color: theme.colorScheme.primary.withOpacity(0.4), blurRadius: 6)]
+                      ? [BoxShadow(color: theme.colorScheme.primary.withValues(alpha: 0.4), blurRadius: 6)]
                       : null,
                 ),
                 child: selected
@@ -122,7 +135,8 @@ class _BackgroundSettingsScreenState extends State<BackgroundSettingsScreen> {
         const Divider(height: 32),
 
         // ── 選擇自訂色 ───────────────────────────────────────────────
-        Text('自訂顏色', style: theme.textTheme.titleSmall),
+        Text(LanguageService.t('custom_color'),
+            style: theme.textTheme.titleSmall),
         const SizedBox(height: 10),
         _ColorSliderPicker(
           initial: _config.type == 'color' ? _config.color : null,
@@ -131,23 +145,32 @@ class _BackgroundSettingsScreenState extends State<BackgroundSettingsScreen> {
         const Divider(height: 32),
 
         // ── 選擇照片 ─────────────────────────────────────────────────
-        Text('照片背景', style: theme.textTheme.titleSmall),
+        Text(LanguageService.t('photo_bg'),
+            style: theme.textTheme.titleSmall),
         const SizedBox(height: 10),
         FilledButton.icon(
           onPressed: _pickImage,
           icon: const Icon(Icons.image_outlined),
-          label: const Text('從相簿選擇照片'),
+          label: Text(LanguageService.t('from_gallery')),
         ),
-        if (_config.type == 'image' && _config.imagePath != null) ...[
+        if (_config.type == 'image' &&
+            (_config.imageData != null || _config.imagePath != null)) ...[
           const SizedBox(height: 10),
           ClipRRect(
             borderRadius: BorderRadius.circular(10),
-            child: Image.file(
-              File(_config.imagePath!),
-              height: 140,
-              width: double.infinity,
-              fit: BoxFit.cover,
-            ),
+            child: _config.imageData != null
+                ? Image.memory(
+                    base64Decode(_config.imageData!),
+                    height: 140,
+                    width: double.infinity,
+                    fit: BoxFit.cover,
+                  )
+                : Image.file(
+                    File(_config.imagePath!),
+                    height: 140,
+                    width: double.infinity,
+                    fit: BoxFit.cover,
+                  ),
           ),
         ],
       ]),
@@ -158,12 +181,15 @@ class _BackgroundSettingsScreenState extends State<BackgroundSettingsScreen> {
     if (cfg.type == 'color' && cfg.color != null) {
       return Container(color: cfg.color);
     }
-    if (cfg.type == 'image' && cfg.imagePath != null) {
+    if (cfg.type == 'image' && cfg.imageData != null) {
+      return Image.memory(base64Decode(cfg.imageData!), fit: BoxFit.cover);
+    }
+    if (!kIsWeb && cfg.type == 'image' && cfg.imagePath != null) {
       return Image.file(File(cfg.imagePath!), fit: BoxFit.cover);
     }
     return Container(
       color: Colors.grey.shade100,
-      child: const Center(child: Text('預設背景', style: TextStyle(color: Colors.grey))),
+      child: Center(child: Text(LanguageService.t('default_bg'), style: const TextStyle(color: Colors.grey))),
     );
   }
 }
@@ -203,7 +229,7 @@ class _ColorSliderPickerState extends State<_ColorSliderPicker> {
                 shape: BoxShape.circle,
                 border: Border.all(color: Colors.grey.shade300))),
         const SizedBox(width: 12),
-        Text('#${preview.value.toRadixString(16).substring(2).toUpperCase()}',
+        Text('#${preview.toARGB32().toRadixString(16).substring(2).toUpperCase()}',
             style: const TextStyle(fontFamily: 'monospace')),
       ]),
       const SizedBox(height: 8),

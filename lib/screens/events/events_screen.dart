@@ -1,10 +1,15 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import '../../api_client.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../config.dart';
+import '../../services/auth_service.dart';
+import '../../services/language_service.dart';
 import '../../services/user_service.dart';
 import '../../utils/photo_actions.dart';
+import '../../widgets/login_dialog.dart';
+import 'calendar_screen.dart';
 
 class EventsScreen extends StatefulWidget {
   const EventsScreen({super.key});
@@ -39,9 +44,10 @@ class _EventsScreenState extends State<EventsScreen>
   }
 
   Future<void> _load() async {
+    await _loadUser(); // 暱稱可能在個人頁更新過，重新讀取
     setState(() => _loading = true);
     try {
-      final r = await http.get(Uri.parse('${Config.baseUrl}/outings'));
+      final r = await ApiClient.get(Uri.parse('${Config.baseUrl}/outings'));
       final list = List<dynamic>.from(jsonDecode(r.body));
       // Sort by date ascending
       list.sort((a, b) =>
@@ -58,7 +64,7 @@ class _EventsScreenState extends State<EventsScreen>
 
   Future<void> _deleteOuting(String id) async {
     try {
-      final resp = await http.delete(
+      final resp = await ApiClient.delete(
           Uri.parse('${Config.baseUrl}/outings/$id'));
       if (resp.statusCode >= 200 && resp.statusCode < 300) {
         await _load();
@@ -82,17 +88,21 @@ class _EventsScreenState extends State<EventsScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('活動'),
+        title: Text(LanguageService.t('nav_events')),
         actions: [IconButton(icon: const Icon(Icons.refresh), onPressed: _load)],
-        bottom: TabBar(controller: _tab, tabs: const [
-          Tab(icon: Icon(Icons.calendar_month), text: '活動歷'),
-          Tab(icon: Icon(Icons.group_add), text: '揪團出遊'),
+        bottom: TabBar(controller: _tab, tabs: [
+          Tab(
+              icon: const Icon(Icons.calendar_month),
+              text: LanguageService.t('tab_calendar')),
+          Tab(
+              icon: const Icon(Icons.group_add),
+              text: LanguageService.t('tab_outings')),
         ]),
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : TabBarView(controller: _tab, children: [
-              _buildCalendar(),
+              const CalendarScreen(),
               _buildOutings(),
             ]),
       floatingActionButton: ListenableBuilder(
@@ -101,7 +111,7 @@ class _EventsScreenState extends State<EventsScreen>
             ? FloatingActionButton.extended(
                 onPressed: () => _showCreateOuting(context),
                 icon: const Icon(Icons.add),
-                label: const Text('新增'),
+                label: Text(LanguageService.t('add')),
               )
             : const SizedBox.shrink(),
       ),
@@ -155,9 +165,12 @@ class _EventsScreenState extends State<EventsScreen>
                 final creator = (o['creator'] ?? '').toString();
                 final isMine = creator == _username || creator.isEmpty;
                 return _OutingCard(
+                  key: ValueKey('outing_g_${o['id']}'),
                   outing: o,
                   isMine: isMine,
+                  username: _username,
                   onDelete: () => _confirmDelete(o),
+                  onChanged: _load,
                 );
               }),
             ],
@@ -179,7 +192,7 @@ class _EventsScreenState extends State<EventsScreen>
           FilledButton.icon(
             onPressed: () => _showCreateOuting(context),
             icon: const Icon(Icons.add),
-            label: const Text('建立行程'),
+            label: Text(LanguageService.t('create_outing')),
           ),
         ]),
       );
@@ -195,9 +208,12 @@ class _EventsScreenState extends State<EventsScreen>
           // 顯示刪除：自己的行程，或舊資料沒有 creator 欄位
           final isMine = creator == _username || creator.isEmpty;
           return _OutingCard(
+            key: ValueKey('outing_${o['id']}'),
             outing: o,
             isMine: isMine,
+            username: _username,
             onDelete: () => _confirmDelete(o),
+            onChanged: _load,
           );
         },
       ),
@@ -208,12 +224,13 @@ class _EventsScreenState extends State<EventsScreen>
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('刪除行程'),
-        content: Text('確定要刪除「${outing['title'] ?? ''}」嗎？'),
+        title: Text(LanguageService.t('del_outing')),
+        content: Text(LanguageService.tp(
+            'del_confirm', {'x': '${outing['title'] ?? ''}'})),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('取消'),
+            child: Text(LanguageService.t('cancel')),
           ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
@@ -221,7 +238,7 @@ class _EventsScreenState extends State<EventsScreen>
               Navigator.pop(context);
               _deleteOuting(outing['id'].toString());
             },
-            child: const Text('刪除'),
+            child: Text(LanguageService.t('delete')),
           ),
         ],
       ),
@@ -244,17 +261,151 @@ class _EventsScreenState extends State<EventsScreen>
   }
 }
 
+/// 行程團體類型顯示名稱（資料庫存中文原值，顯示依語言翻譯）
+String _outingTypeLabel(String v) {
+  switch (v) {
+    case '個人':
+      return LanguageService.t('type_solo');
+    case '小隊(3人)':
+      return LanguageService.t('type_small');
+    case '大隊(多人)':
+      return LanguageService.t('type_large');
+    default:
+      return v;
+  }
+}
+
 // ── 行程卡片 ────────────────────────────────────────────────────────
-class _OutingCard extends StatelessWidget {
+class _OutingCard extends StatefulWidget {
   final Map outing;
   final bool isMine;
+  final String username;
   final VoidCallback onDelete;
+  final VoidCallback onChanged;
 
-  const _OutingCard({required this.outing, required this.isMine, required this.onDelete});
+  const _OutingCard({
+    super.key,
+    required this.outing,
+    required this.isMine,
+    required this.username,
+    required this.onDelete,
+    required this.onChanged,
+  });
+
+  @override
+  State<_OutingCard> createState() => _OutingCardState();
+}
+
+class _OutingCardState extends State<_OutingCard> {
+  List<String> _members = [];
+  bool _busy = false;
+  String _myName = '';
+
+  Map get outing => widget.outing;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchMembers();
+    _loadMyName();
+  }
+
+  /// 每次都重新讀取暱稱（暱稱可能剛在個人頁設定，避免拿到舊值）
+  Future<void> _loadMyName() async {
+    final n = (await UserService.getUsername())?.trim() ?? '';
+    if (mounted && n.isNotEmpty) setState(() => _myName = n);
+  }
+
+  String get _effectiveName =>
+      _myName.isNotEmpty ? _myName : widget.username;
+
+  Future<void> _fetchMembers() async {
+    try {
+      final r = await ApiClient.get(Uri.parse(
+          '${Config.baseUrl}/outings/${outing['id']}/members'));
+      if (!mounted || r.statusCode != 200) return;
+      setState(() => _members = (jsonDecode(r.body) as List)
+          .map((e) => '${e['name']}')
+          .toList());
+    } catch (_) {}
+  }
+
+  bool get _isMember =>
+      _effectiveName.isNotEmpty &&
+      _effectiveName != '匿名' &&
+      _members.contains(_effectiveName);
+
+  Future<void> _join() async {
+    await _loadMyName(); // 取得最新暱稱
+    final name = _effectiveName;
+    if (name.isEmpty || name == '匿名') {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(LanguageService.t('msg_set_nickname'))));
+      }
+      return;
+    }
+    setState(() => _busy = true);
+    try {
+      final r = await ApiClient.post(
+        Uri.parse('${Config.baseUrl}/outings/${outing['id']}/join'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'name': name}),
+      );
+      final body = jsonDecode(r.body);
+      if (r.statusCode != 200) {
+        throw body['error'] ?? LanguageService.t('msg_join_fail');
+      }
+      // 自動加入行程專屬聊天室
+      final room = body['room'];
+      if (room != null && room['id'] != null) {
+        await UserService.joinRoom('${room['id']}');
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(LanguageService.tp(
+              'msg_joined', {'x': '${outing['title']}'}))));
+      await _fetchMembers();
+      widget.onChanged();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('$e')));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _leave() async {
+    setState(() => _busy = true);
+    try {
+      await ApiClient.post(
+        Uri.parse('${Config.baseUrl}/outings/${outing['id']}/leave'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'name': _effectiveName}),
+      );
+      if (!mounted) return;
+      await _fetchMembers();
+      widget.onChanged();
+    } catch (_) {
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
 
   List<String> _urls(dynamic raw) {
     if (raw == null) return [];
     if (raw is List) return raw.map((e) => e.toString()).where((s) => s.isNotEmpty).toList();
+    // D1 將陣列以 JSON 字串儲存
+    if (raw is String && raw.isNotEmpty) {
+      try {
+        final l = jsonDecode(raw);
+        if (l is List) {
+          return l.map((e) => e.toString()).where((s) => s.isNotEmpty).toList();
+        }
+      } catch (_) {}
+    }
     return [];
   }
 
@@ -277,14 +428,16 @@ class _OutingCard extends StatelessWidget {
           Row(children: [
             Expanded(child: Text(o['title'] ?? '',
                 style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16))),
-            Chip(label: Text(o['type'] ?? '', style: const TextStyle(fontSize: 12)),
+            Chip(
+                label: Text(_outingTypeLabel('${o['type'] ?? ''}'),
+                    style: const TextStyle(fontSize: 12)),
                 padding: EdgeInsets.zero,
                 materialTapTargetSize: MaterialTapTargetSize.shrinkWrap),
-            if (isMine)
+            if (widget.isMine)
               IconButton(
                 icon: const Icon(Icons.delete_outline, color: Colors.red, size: 20),
                 tooltip: '刪除行程',
-                onPressed: onDelete,
+                onPressed: widget.onDelete,
                 padding: const EdgeInsets.all(4),
                 constraints: const BoxConstraints(),
               ),
@@ -313,8 +466,121 @@ class _OutingCard extends StatelessWidget {
                 value: capacity > 0 ? joined / capacity : 0, minHeight: 6),
           ),
           const SizedBox(height: 4),
-          Text('已報名 $joined / $capacity 人', style: const TextStyle(fontSize: 12)),
+          Text(
+              LanguageService.tp(
+                  'reg_count', {'a': '$joined', 'b': '$capacity'}),
+              style: const TextStyle(fontSize: 12)),
+
+          // 加入 / 退出行程
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: _isMember
+                ? OutlinedButton.icon(
+                    icon: const Icon(Icons.exit_to_app, size: 18),
+                    label: Text(LanguageService.t('leave_outing')),
+                    onPressed: _busy ? null : _leave,
+                  )
+                : FilledButton.tonalIcon(
+                    icon: const Icon(Icons.group_add, size: 18),
+                    label: Text(_busy
+                        ? '…'
+                        : LanguageService.t('join_outing')),
+                    onPressed: _busy ? null : _join,
+                  ),
+          ),
+
+          // 參加成員名單：僅已加入的人可見
+          if (_isMember && _members.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(LanguageService.t('members'),
+                style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.grey.shade700)),
+            const SizedBox(height: 4),
+            Wrap(
+              spacing: 6,
+              runSpacing: 4,
+              children: _members
+                  .map((n) => Chip(
+                        avatar: const Icon(Icons.person, size: 14),
+                        label:
+                            Text(n, style: const TextStyle(fontSize: 11)),
+                        padding: EdgeInsets.zero,
+                        materialTapTargetSize:
+                            MaterialTapTargetSize.shrinkWrap,
+                      ))
+                  .toList(),
+            ),
+          ] else if (!_isMember) ...[
+            const SizedBox(height: 4),
+            Text('加入後可查看參加成員，並自動加入行程專屬聊天室',
+                style:
+                    TextStyle(fontSize: 11, color: Colors.grey.shade500)),
+          ],
         ]),
+      ),
+    );
+  }
+}
+
+// ── 全螢幕照片檢視器（縮放 + 翻頁） ────────────────────
+class _PhotoViewer extends StatefulWidget {
+  final List<String> urls;
+  final int initial;
+  const _PhotoViewer({required this.urls, required this.initial});
+
+  @override
+  State<_PhotoViewer> createState() => _PhotoViewerState();
+}
+
+class _PhotoViewerState extends State<_PhotoViewer> {
+  late final PageController _ctrl = PageController(initialPage: widget.initial);
+  late int _index = widget.initial;
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        title: Text('${_index + 1} / ${widget.urls.length}'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.more_horiz),
+            tooltip: '更多',
+            onPressed: () =>
+                showPhotoActions(context, url: widget.urls[_index]),
+          ),
+        ],
+      ),
+      body: PageView.builder(
+        controller: _ctrl,
+        itemCount: widget.urls.length,
+        onPageChanged: (i) => setState(() => _index = i),
+        itemBuilder: (_, i) => InteractiveViewer(
+          maxScale: 5,
+          child: Center(
+            child: Image.network(
+              fullImageUrl(widget.urls[i]),
+              fit: BoxFit.contain,
+              loadingBuilder: (_, child, progress) => progress == null
+                  ? child
+                  : const Center(
+                      child: CircularProgressIndicator(color: Colors.white54)),
+              errorBuilder: (_, __, ___) => const Icon(Icons.broken_image,
+                  color: Colors.white54, size: 64),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -339,7 +605,13 @@ class _PhotoRow extends StatelessWidget {
             scrollDirection: Axis.horizontal,
             itemCount: urls.length,
             itemBuilder: (_, i) => GestureDetector(
-              onTap: () => showPhotoActions(context, url: urls[i]),
+              // 點擊縮圖 → 全螢幕檢視（可縮放、左右滑動）
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => _PhotoViewer(urls: urls, initial: i),
+                ),
+              ),
               child: Container(
                 width: 72,
                 height: 72,
@@ -399,40 +671,58 @@ class _CreateOutingSheetState extends State<_CreateOutingSheet> {
 
   // 選照片 → 上傳 → 取得 URL
   Future<void> _pickPhoto(List<String> target) async {
+    if (!AuthService.isLoggedIn) {
+      final ok = await LoginDialog.show(context);
+      if (!ok || !mounted) return;
+    }
     final picker = ImagePicker();
     final picked = await picker.pickImage(source: ImageSource.gallery, imageQuality: 80);
     if (picked == null) return;
     try {
       final bytes = await picked.readAsBytes();
       final req = http.MultipartRequest('POST', Uri.parse('${Config.baseUrl}/upload'));
+      req.headers.addAll(AuthService.authHeader);
       req.files.add(http.MultipartFile.fromBytes('file', bytes,
           filename: picked.name.isNotEmpty ? picked.name : 'photo.jpg'));
       final resp = await req.send();
       final body = jsonDecode(await resp.stream.bytesToString());
       if (resp.statusCode == 200 && body['url'] != null) {
         setState(() => target.add(body['url'] as String));
+      } else {
+        // 顯示後端錯誤（例如未登入 401），不再默默失敗
+        final msg =
+            (body is Map ? body['error'] : null) ?? 'HTTP ${resp.statusCode}';
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content:
+                  Text('${LanguageService.t('msg_upload_fail')}: $msg')));
+        }
       }
     } catch (e) {
       debugPrint('錯誤：$e');
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('上傳失敗：$e')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('${LanguageService.t('msg_upload_fail')}: $e')));
+      }
     }
   }
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     if (_date == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('請選擇日期')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(LanguageService.t('msg_pick_date'))));
       return;
     }
     setState(() => _saving = true);
     try {
-      await http.post(
+      final res = await ApiClient.post(
         Uri.parse('${Config.baseUrl}/outings'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'title': _title.text,
           'type': _type,
-          'date': '${_date!.year}-${_date!.month.toString().padLeft(2,'0')}-${_date!.day.toString().padLeft(2,'0')}',
+          'date': '${_date!.year}-${_date!.month.toString().padLeft(2, "0")}-${_date!.day.toString().padLeft(2, "0")}',
           'location': _location.text,
           'destination': _destination.text,
           'accommodation': _accommodation.text,
@@ -444,16 +734,37 @@ class _CreateOutingSheetState extends State<_CreateOutingSheet> {
           'photos_accommodation': _photosAccommodation,
         }),
       );
+      // 創建者自動加入行程 + 行程專屬聊天室
+      try {
+        final created = jsonDecode(res.body);
+        final outingId = created['id'];
+        if (outingId != null &&
+            widget.creator.isNotEmpty &&
+            widget.creator != '匿名') {
+          final jr = await ApiClient.post(
+            Uri.parse('${Config.baseUrl}/outings/$outingId/join'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({'name': widget.creator}),
+          );
+          final jb = jsonDecode(jr.body);
+          final room = jb['room'];
+          if (jr.statusCode == 200 && room != null && room['id'] != null) {
+            await UserService.joinRoom('${room['id']}');
+          }
+        }
+      } catch (_) {}
       if (mounted) {
         Navigator.pop(context);
         widget.onCreated();
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('行程已建立！')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(LanguageService.t('msg_outing_created'))));
       }
     } catch (e) {
       debugPrint('錯誤：$e');
       if (mounted) {
         setState(() => _saving = false);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('建立失敗：$e')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('${LanguageService.t('msg_create_fail')}: $e')));
       }
     }
   }
@@ -466,7 +777,8 @@ class _CreateOutingSheetState extends State<_CreateOutingSheet> {
         TextButton.icon(
           onPressed: onAdd,
           icon: const Icon(Icons.add_photo_alternate, size: 18),
-          label: const Text('新增', style: TextStyle(fontSize: 12)),
+          label: Text(LanguageService.t('add'),
+              style: const TextStyle(fontSize: 12)),
         ),
       ]),
       if (photos.isNotEmpty)
@@ -515,7 +827,7 @@ class _CreateOutingSheetState extends State<_CreateOutingSheet> {
         child: SingleChildScrollView(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
-              Text('新增揪團',
+              Text(LanguageService.t('create_outing'),
                   style: Theme.of(context).textTheme.titleLarge
                       ?.copyWith(fontWeight: FontWeight.bold)),
               const Spacer(),
@@ -524,15 +836,30 @@ class _CreateOutingSheetState extends State<_CreateOutingSheet> {
             const SizedBox(height: 16),
             TextFormField(
               controller: _title,
-              decoration: const InputDecoration(labelText: '標題 *', border: OutlineInputBorder()),
-              validator: (v) => v!.isEmpty ? '請輸入標題' : null,
+              decoration: InputDecoration(
+                  labelText: '${LanguageService.t('f_title')} *',
+                  border: const OutlineInputBorder()),
+              validator: (v) =>
+                  v!.isEmpty ? LanguageService.t('msg_need_title') : null,
             ),
             const SizedBox(height: 12),
             DropdownButtonFormField<String>(
               value: _type,
-              decoration: const InputDecoration(labelText: '類型', border: OutlineInputBorder()),
-              items: ['個人', '小隊(3人)', '大隊(多人)']
-                  .map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
+              decoration: InputDecoration(
+                  labelText: LanguageService.t('f_type'),
+                  border: const OutlineInputBorder()),
+              // value 維持中文存入後端，顯示文字依語言翻譯
+              items: [
+                DropdownMenuItem(
+                    value: '個人',
+                    child: Text(LanguageService.t('type_solo'))),
+                DropdownMenuItem(
+                    value: '小隊(3人)',
+                    child: Text(LanguageService.t('type_small'))),
+                DropdownMenuItem(
+                    value: '大隊(多人)',
+                    child: Text(LanguageService.t('type_large'))),
+              ],
               onChanged: (v) => setState(() => _type = v!),
             ),
             const SizedBox(height: 12),
@@ -547,29 +874,50 @@ class _CreateOutingSheetState extends State<_CreateOutingSheet> {
                 if (d != null) setState(() => _date = d);
               },
               child: InputDecorator(
-                decoration: const InputDecoration(labelText: '日期 *', border: OutlineInputBorder()),
+                decoration: InputDecoration(
+                    labelText: '${LanguageService.t('f_date')} *',
+                    border: const OutlineInputBorder()),
                 child: Text(
-                  _date == null ? '點擊選擇日期' : '${_date!.year}/${_date!.month}/${_date!.day}',
+                  _date == null
+                      ? LanguageService.t('pick_date_tap')
+                      : '${_date!.year}/${_date!.month}/${_date!.day}',
                   style: TextStyle(color: _date == null ? Colors.grey : Colors.black),
                 ),
               ),
             ),
             const SizedBox(height: 12),
             TextFormField(controller: _location,
-                decoration: const InputDecoration(labelText: '集合地點', border: OutlineInputBorder())),
+                decoration: InputDecoration(
+                    labelText: LanguageService.t('f_meet'),
+                    border: const OutlineInputBorder())),
             const SizedBox(height: 6),
-            _photoSection('集合地點照片', _photosLocation, () => _pickPhoto(_photosLocation)),
+            _photoSection(
+                '${LanguageService.t('f_meet')}・${LanguageService.t('photo')}',
+                _photosLocation,
+                () => _pickPhoto(_photosLocation)),
             TextFormField(controller: _destination,
-                decoration: const InputDecoration(labelText: '目的地', border: OutlineInputBorder())),
+                decoration: InputDecoration(
+                    labelText: LanguageService.t('f_dest'),
+                    border: const OutlineInputBorder())),
             const SizedBox(height: 6),
-            _photoSection('目的地照片', _photosDestination, () => _pickPhoto(_photosDestination)),
+            _photoSection(
+                '${LanguageService.t('f_dest')}・${LanguageService.t('photo')}',
+                _photosDestination,
+                () => _pickPhoto(_photosDestination)),
             TextFormField(controller: _accommodation,
-                decoration: const InputDecoration(labelText: '住宿資訊', border: OutlineInputBorder())),
+                decoration: InputDecoration(
+                    labelText: LanguageService.t('f_accom'),
+                    border: const OutlineInputBorder())),
             const SizedBox(height: 6),
-            _photoSection('住宿照片', _photosAccommodation, () => _pickPhoto(_photosAccommodation)),
+            _photoSection(
+                '${LanguageService.t('f_accom')}・${LanguageService.t('photo')}',
+                _photosAccommodation,
+                () => _pickPhoto(_photosAccommodation)),
             TextFormField(
               controller: _capacity,
-              decoration: const InputDecoration(labelText: '人數上限', border: OutlineInputBorder()),
+              decoration: InputDecoration(
+                  labelText: LanguageService.t('f_capacity'),
+                  border: const OutlineInputBorder()),
               keyboardType: TextInputType.number,
             ),
             const SizedBox(height: 20),
@@ -578,9 +926,10 @@ class _CreateOutingSheetState extends State<_CreateOutingSheet> {
               child: FilledButton(
                 onPressed: _saving ? null : _submit,
                 child: _saving
-                    ? const SizedBox(height: 20, width: 20,
+                    ? const SizedBox(
+                        height: 20, width: 20,
                         child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                    : const Text('建立行程'),
+                    : Text(LanguageService.t('create_outing')),
               ),
             ),
           ]),

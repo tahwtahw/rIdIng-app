@@ -2,9 +2,10 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:http/http.dart' as http;
+import '../../api_client.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../config.dart';
+import '../../services/language_service.dart';
 import '../../services/user_service.dart';
 import 'room_photos_screen.dart';
 
@@ -69,10 +70,11 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
       context: context,
       barrierDismissible: false,
       builder: (_) => AlertDialog(
-        title: const Text('設定暱稱'),
+        title: Text(LanguageService.t('set_nickname')),
         content: TextField(
           controller: ctrl,
-          decoration: const InputDecoration(hintText: '輸入你的暱稱'),
+          decoration: InputDecoration(
+              hintText: LanguageService.t('enter_your_nickname')),
           autofocus: true,
         ),
         actions: [
@@ -83,7 +85,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
               await UserService.setUsername(name);
               if (mounted) Navigator.pop(context, name);
             },
-            child: const Text('確認'),
+            child: Text(LanguageService.t('confirm')),
           ),
         ],
       ),
@@ -94,15 +96,15 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
     await showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('公開聊天室通知'),
-        content: const Text('是否開啟公開聊天室的新訊息通知？'),
+        title: Text(LanguageService.t('notif_title')),
+        content: Text(LanguageService.t('notif_ask')),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context),
-              child: const Text('暫時不要')),
+              child: Text(LanguageService.t('not_now'))),
           FilledButton(
               onPressed: () => Navigator.pop(context),
-              child: const Text('開啟')),
+              child: Text(LanguageService.t('open'))),
         ],
       ),
     );
@@ -110,7 +112,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
 
   Future<void> _loadMessages() async {
     try {
-      final r = await http.get(
+      final r = await ApiClient.get(
         Uri.parse('${Config.baseUrl}/rooms/${widget.roomId}/messages'),
       );
       final msgs = jsonDecode(r.body) as List;
@@ -128,7 +130,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
       final url = _lastTime != null
           ? '${Config.baseUrl}/rooms/${widget.roomId}/messages?since=${Uri.encodeComponent(_lastTime!)}'
           : '${Config.baseUrl}/rooms/${widget.roomId}/messages';
-      final r = await http.get(Uri.parse(url));
+      final r = await ApiClient.get(Uri.parse(url));
       final newMsgs = jsonDecode(r.body) as List;
       if (newMsgs.isNotEmpty) {
         setState(() {
@@ -170,7 +172,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
           'text': replySnapshot['text'],
         };
       }
-      final r = await http.post(
+      final r = await ApiClient.post(
         Uri.parse('${Config.baseUrl}/rooms/${widget.roomId}/messages'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode(body),
@@ -216,18 +218,18 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
             const Divider(height: 1),
             _MenuItem(
               icon: Icons.copy_outlined,
-              label: '複製',
+              label: LanguageService.t('copy'),
               onTap: () {
                 Navigator.pop(context);
                 Clipboard.setData(ClipboardData(text: msg['text'] ?? ''));
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('已複製訊息')),
+                  SnackBar(content: Text(LanguageService.t('msg_copied'))),
                 );
               },
             ),
             _MenuItem(
               icon: Icons.share_outlined,
-              label: '分享',
+              label: LanguageService.t('share'),
               onTap: () {
                 Navigator.pop(context);
                 Share.share(msg['text'] ?? '');
@@ -235,7 +237,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
             ),
             _MenuItem(
               icon: Icons.reply_outlined,
-              label: '回覆',
+              label: LanguageService.t('reply'),
               onTap: () {
                 Navigator.pop(context);
                 setState(() => _replyTo = msg);
@@ -247,7 +249,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
             if (isMine)
               _MenuItem(
                 icon: Icons.edit_outlined,
-                label: '編輯',
+                label: LanguageService.t('edit'),
                 onTap: () {
                   Navigator.pop(context);
                   _showEditDialog(msg);
@@ -265,7 +267,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('編輯訊息'),
+        title: Text(LanguageService.t('edit_message')),
         content: TextField(
           controller: ctrl,
           decoration: const InputDecoration(border: OutlineInputBorder()),
@@ -275,7 +277,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context),
-              child: const Text('取消')),
+              child: Text(LanguageService.t('cancel'))),
           FilledButton(
             onPressed: () async {
               final newText = ctrl.text.trim();
@@ -283,7 +285,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
               Navigator.pop(context);
               await _editMessage(msg['id'], newText);
             },
-            child: const Text('儲存'),
+            child: Text(LanguageService.t('save')),
           ),
         ],
       ),
@@ -292,7 +294,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
 
   Future<void> _editMessage(String msgId, String newText) async {
     try {
-      final r = await http.put(
+      final r = await ApiClient.put(
         Uri.parse(
             '${Config.baseUrl}/rooms/${widget.roomId}/messages/$msgId'),
         headers: {'Content-Type': 'application/json'},
@@ -307,7 +309,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
       debugPrint('錯誤：$e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('編輯失敗：$e')),
+          SnackBar(content: Text('${LanguageService.t('edit_fail')}: $e')),
         );
       }
     }
@@ -329,18 +331,27 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(widget.roomName),
+            // 公開聊天室名稱依語言顯示；私人聊天室顯示自訂名稱
+            Text(widget.isPublic
+                ? LanguageService.t('public_room')
+                : widget.roomName),
             Text(
-              widget.isPublic ? '公開聊天室' : '私人聊天室',
+              widget.isPublic
+                  ? LanguageService.t('public_room')
+                  : LanguageService.t('private_room'),
               style: const TextStyle(fontSize: 12),
             ),
           ],
         ),
         bottom: TabBar(
           controller: _tabController,
-          tabs: const [
-            Tab(icon: Icon(Icons.chat_bubble_outline), text: '訊息'),
-            Tab(icon: Icon(Icons.photo_library_outlined), text: '相簿'),
+          tabs: [
+            Tab(
+                icon: const Icon(Icons.chat_bubble_outline),
+                text: LanguageService.t('messages')),
+            Tab(
+                icon: const Icon(Icons.photo_library_outlined),
+                text: LanguageService.t('nav_gallery')),
           ],
         ),
       ),
@@ -351,9 +362,9 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
           Column(children: [
             Expanded(
               child: _messages.isEmpty
-                  ? const Center(
-                      child: Text('還沒有訊息，來說第一句話吧！',
-                          style: TextStyle(color: Colors.grey)))
+                  ? Center(
+                      child: Text(LanguageService.t('no_messages'),
+                          style: const TextStyle(color: Colors.grey)))
                   : ListView.builder(
                       controller: _scroll,
                       padding: const EdgeInsets.symmetric(
@@ -490,63 +501,6 @@ class _Bubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final bubble = Column(
-      crossAxisAlignment:
-          isMine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-      children: [
-        // Quoted reply
-        if (replyTo != null)
-          Container(
-            margin: const EdgeInsets.only(bottom: 4),
-            padding:
-                const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            decoration: BoxDecoration(
-              color: isMine
-                  ? Colors.white.withOpacity(0.2)
-                  : theme.colorScheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(8),
-              border: Border(
-                left: BorderSide(
-                  color: isMine
-                      ? Colors.white
-                      : theme.colorScheme.primary,
-                  width: 3,
-                ),
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(replyTo!['sender'] ?? '',
-                    style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        color: isMine
-                            ? Colors.white70
-                            : theme.colorScheme.primary)),
-                Text(replyTo!['text'] ?? '',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                        fontSize: 12,
-                        color: isMine
-                            ? Colors.white70
-                            : Colors.grey.shade700)),
-              ],
-            ),
-          ),
-        // Message text
-        Row(
-          children: [
-            if (!isMine) const SizedBox.shrink(),
-            Text(
-              edited ? '已編輯 · $time' : time,
-              style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
-            ),
-          ],
-        ),
-      ],
-    );
 
     if (isMine) {
       return Padding(
@@ -555,7 +509,7 @@ class _Bubble extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.end,
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            Text(edited ? '已編輯 · $time' : time,
+            Text(edited ? '${LanguageService.t('edited')} · $time' : time,
                 style: TextStyle(
                     fontSize: 11, color: Colors.grey.shade500)),
             const SizedBox(width: 6),
@@ -647,7 +601,7 @@ class _Bubble extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 6),
-                    Text(edited ? '已編輯 · $time' : time,
+                    Text(edited ? '${LanguageService.t('edited')} · $time' : time,
                         style: TextStyle(
                             fontSize: 11,
                             color: Colors.grey.shade500)),
@@ -676,9 +630,9 @@ class _QuoteBox extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
       decoration: BoxDecoration(
         color: isMine
-            ? Colors.white.withOpacity(0.18)
+            ? Colors.white.withValues(alpha: 0.18)
             : theme.colorScheme.surfaceContainerHighest
-                .withOpacity(0.6),
+                .withValues(alpha: 0.6),
         borderRadius: BorderRadius.circular(6),
         border: Border(
           left: BorderSide(
@@ -733,7 +687,7 @@ class _InputBar extends StatelessWidget {
         color: Theme.of(context).colorScheme.surface,
         boxShadow: [
           BoxShadow(
-              color: Colors.black.withOpacity(0.05),
+              color: Colors.black.withValues(alpha: 0.05),
               blurRadius: 4,
               offset: const Offset(0, -2))
         ],
@@ -746,7 +700,7 @@ class _InputBar extends StatelessWidget {
             textInputAction: TextInputAction.send,
             onSubmitted: (_) => onSend(),
             decoration: InputDecoration(
-              hintText: '輸入訊息...',
+              hintText: LanguageService.t('type_message'),
               isDense: true,
               contentPadding: const EdgeInsets.symmetric(
                   horizontal: 14, vertical: 10),

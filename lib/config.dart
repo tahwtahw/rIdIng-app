@@ -1,6 +1,6 @@
 class Config {
   // ── 填入你的 Render 後端網址 ────────────────────────────────
-  static const String _prodUrl = 'https://riding-backend.onrender.com/api';
+  static const String _prodUrl = 'https://riding-backend.fallwind969.workers.dev/api';
 
   // ── 本機開發用（同 WiFi 測試）──────────────────────────────
   static const String serverIp   = '192.168.1.106';

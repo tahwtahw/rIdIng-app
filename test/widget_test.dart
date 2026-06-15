@@ -1,30 +1,24 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-
-import 'package:riding_app/main.dart';
+import 'package:riding_app/services/language_service.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  test('LanguageService 翻譯回退測試', () {
+    // 預設語言為繁中
+    LanguageService.notifier.value = 'zh-TW';
+    expect(LanguageService.t('nav_home'), '首頁');
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    // 切換英文
+    LanguageService.notifier.value = 'en';
+    expect(LanguageService.t('nav_home'), 'Home');
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
+    // 不存在的 key 回傳 key 本身
+    expect(LanguageService.t('__no_such_key__'), '__no_such_key__');
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    // 參數替換
+    LanguageService.notifier.value = 'zh-TW';
+    expect(
+      LanguageService.tp('room_joined', {'x': '測試'}),
+      '已加入「測試」',
+    );
   });
 }

@@ -47,6 +47,10 @@
 			</array>
 		</dict>
 	</dict>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>顯示您在地圖上的位置，以便規劃騎行路線天氣。</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>騎行中持續追蹤位置以更新路線天氣。</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UILaunchStoryboardName</key>

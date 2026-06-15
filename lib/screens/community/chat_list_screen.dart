@@ -1,9 +1,10 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:http/http.dart' as http;
+import '../../api_client.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import '../../config.dart';
+import '../../services/language_service.dart';
 import '../../services/user_service.dart';
 import 'chat_room_screen.dart';
 
@@ -29,7 +30,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
     setState(() => _loading = true);
     try {
       final joined = await UserService.getJoinedRooms();
-      final r = await http.get(Uri.parse('${Config.baseUrl}/rooms'));
+      final r = await ApiClient.get(Uri.parse('${Config.baseUrl}/rooms'));
       final all = jsonDecode(r.body) as List;
       setState(() {
         _allRooms = all;
@@ -62,7 +63,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('聊天室'),
+        title: Text(LanguageService.t('chat_rooms')),
         actions: [
           IconButton(icon: const Icon(Icons.refresh), onPressed: _load),
         ],
@@ -85,7 +86,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                   if (_myRooms.where((r) => r['id'] != 'public').isEmpty)
                     Padding(
                       padding: const EdgeInsets.symmetric(vertical: 12),
-                      child: Text('尚未加入任何私人聊天室',
+                      child: Text(LanguageService.t('msg_no_rooms'),
                           style: TextStyle(color: Colors.grey.shade500),
                           textAlign: TextAlign.center),
                     ),
@@ -98,7 +99,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
           FloatingActionButton.small(
             heroTag: 'join',
             onPressed: () => _showJoinDialog(context),
-            tooltip: '加入聊天室',
+            tooltip: LanguageService.t('join_room'),
             child: const Icon(Icons.login),
           ),
           const SizedBox(height: 8),
@@ -106,7 +107,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
             heroTag: 'create',
             onPressed: () => _showCreateDialog(context),
             icon: const Icon(Icons.add),
-            label: const Text('建立聊天室'),
+            label: Text(LanguageService.t('create_room')),
           ),
         ],
       ),
@@ -124,9 +125,9 @@ class _ChatListScreenState extends State<ChatListScreen> {
           backgroundColor: Colors.blue.shade100,
           child: Icon(Icons.public, color: Colors.blue.shade700),
         ),
-        title: const Text('公開聊天室',
-            style: TextStyle(fontWeight: FontWeight.bold)),
-        subtitle: const Text('所有人都可以參與的公共頻道'),
+        title: Text(LanguageService.t('public_room'),
+            style: const TextStyle(fontWeight: FontWeight.bold)),
+        subtitle: Text(LanguageService.t('public_room_desc')),
         trailing: const Icon(Icons.chevron_right),
         onTap: () => _openRoom(room),
       ),
@@ -145,18 +146,19 @@ class _ChatListScreenState extends State<ChatListScreen> {
           ),
           title: Text(room['name'] ?? '',
               style: const TextStyle(fontWeight: FontWeight.w600)),
-          subtitle: Text('代碼：${room['code'] ?? ''}'),
+          subtitle:
+              Text('${LanguageService.t('room_code')}: ${room['code'] ?? ''}'),
           trailing: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               IconButton(
                 icon: const Icon(Icons.qr_code),
-                tooltip: '顯示 QR Code',
+                tooltip: LanguageService.t('show_qr'),
                 onPressed: () => _showQrCode(context, room),
               ),
               IconButton(
                 icon: const Icon(Icons.logout, color: Colors.red),
-                tooltip: '離開聊天室',
+                tooltip: LanguageService.t('leave_room'),
                 onPressed: () => _leaveRoom(room),
               ),
             ],
@@ -191,7 +193,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Text(
-                  '代碼：${room['code']}',
+                  '${LanguageService.t('room_code')}: ${room['code']}',
                   style: const TextStyle(
                       fontSize: 22, fontWeight: FontWeight.bold,
                       letterSpacing: 4),
@@ -202,20 +204,20 @@ class _ChatListScreenState extends State<ChatListScreen> {
                   onPressed: () {
                     Clipboard.setData(
                         ClipboardData(text: room['code'] ?? ''));
-                    ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('已複製代碼')));
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                        content: Text(LanguageService.t('code_copied'))));
                   },
                 ),
               ],
             ),
-            const Text('分享此 QR Code 或代碼給朋友',
-                style: TextStyle(color: Colors.grey, fontSize: 13)),
+            Text(LanguageService.t('share_qr'),
+                style: const TextStyle(color: Colors.grey, fontSize: 13)),
           ],
         ),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context),
-              child: const Text('關閉')),
+              child: Text(LanguageService.t('close'))),
         ],
       ),
     );
@@ -226,19 +228,19 @@ class _ChatListScreenState extends State<ChatListScreen> {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('建立私人聊天室'),
+        title: Text(LanguageService.t('create_private_room')),
         content: TextField(
           controller: ctrl,
-          decoration: const InputDecoration(
-            labelText: '聊天室名稱',
-            border: OutlineInputBorder(),
+          decoration: InputDecoration(
+            labelText: LanguageService.t('room_name'),
+            border: const OutlineInputBorder(),
           ),
           autofocus: true,
         ),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context),
-              child: const Text('取消')),
+              child: Text(LanguageService.t('cancel'))),
           FilledButton(
             onPressed: () async {
               final name = ctrl.text.trim();
@@ -246,7 +248,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
               Navigator.pop(context);
               await _createRoom(name);
             },
-            child: const Text('建立'),
+            child: Text(LanguageService.t('create')),
           ),
         ],
       ),
@@ -255,7 +257,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
 
   Future<void> _createRoom(String name) async {
     try {
-      final r = await http.post(
+      final r = await ApiClient.post(
         Uri.parse('${Config.baseUrl}/rooms'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'name': name, 'is_public': false}),
@@ -267,8 +269,8 @@ class _ChatListScreenState extends State<ChatListScreen> {
     } catch (e) {
       debugPrint('錯誤：$e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('建立失敗：$e')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('${LanguageService.t('msg_create_fail')}: $e')));
       }
     }
   }
@@ -278,12 +280,12 @@ class _ChatListScreenState extends State<ChatListScreen> {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('加入私人聊天室'),
+        title: Text(LanguageService.t('join_private_room')),
         content: TextField(
           controller: ctrl,
-          decoration: const InputDecoration(
-            labelText: '輸入 6 碼房間代碼',
-            border: OutlineInputBorder(),
+          decoration: InputDecoration(
+            labelText: LanguageService.t('code_hint'),
+            border: const OutlineInputBorder(),
           ),
           textCapitalization: TextCapitalization.characters,
           maxLength: 6,
@@ -300,7 +302,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
               Navigator.pop(context);
               await _joinByCode(code);
             },
-            child: const Text('加入'),
+            child: Text(LanguageService.t('join')),
           ),
         ],
       ),
@@ -309,12 +311,12 @@ class _ChatListScreenState extends State<ChatListScreen> {
 
   Future<void> _joinByCode(String code) async {
     try {
-      final r = await http.get(
+      final r = await ApiClient.get(
           Uri.parse('${Config.baseUrl}/rooms/code/$code'));
       if (r.statusCode == 404) {
         if (mounted) {
-          ScaffoldMessenger.of(context)
-              .showSnackBar(const SnackBar(content: Text('找不到此聊天室代碼')));
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text(LanguageService.t('room_not_found'))));
         }
         return;
       }
@@ -322,14 +324,15 @@ class _ChatListScreenState extends State<ChatListScreen> {
       await UserService.joinRoom(room['id']);
       await _load();
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('已加入「${room['name']}」')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(LanguageService.tp(
+                'room_joined', {'x': '${room['name']}'}))));
       }
     } catch (e) {
       debugPrint('錯誤：$e');
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('加入失敗：$e')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('${LanguageService.t('msg_join_fail')}: $e')));
       }
     }
   }
@@ -338,16 +341,17 @@ class _ChatListScreenState extends State<ChatListScreen> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('離開聊天室'),
-        content: Text('確定離開「${room['name']}」？'),
+        title: Text(LanguageService.t('leave_room')),
+        content: Text(LanguageService.tp(
+            'leave_room_confirm', {'x': '${room['name']}'})),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text('取消')),
+              child: Text(LanguageService.t('cancel'))),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('離開'),
+            child: Text(LanguageService.t('leave')),
           ),
         ],
       ),

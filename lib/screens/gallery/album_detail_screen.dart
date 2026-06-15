@@ -1,10 +1,25 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import '../../api_client.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../config.dart';
+import '../../services/auth_service.dart';
+import '../../widgets/login_dialog.dart';
+import '../../services/language_service.dart';
 import '../../services/user_service.dart';
 import '../../utils/photo_actions.dart';
+
+/// 依點讚數回傳愛心顏色（彩度隨梯度遞增）
+Color _heartColor(int likes) {
+  if (likes <= 50)   return const Color(0xFFFFCDD2); // 淡粉
+  if (likes <= 150)  return const Color(0xFFEF9A9A); // 粉
+  if (likes <= 350)  return const Color(0xFFE57373); // 淡紅
+  if (likes <= 750)  return const Color(0xFFF44336); // 紅
+  if (likes <= 1250) return const Color(0xFFE53935); // 深紅
+  if (likes <= 2000) return const Color(0xFFC62828); // 更深紅
+  return const Color(0xFFB71C1C);                    // 最深紅
+}
 
 class AlbumDetailScreen extends StatefulWidget {
   final Map album;
@@ -34,7 +49,7 @@ class _AlbumDetailScreenState extends State<AlbumDetailScreen> {
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
-      final r = await http.get(
+      final r = await ApiClient.get(
         Uri.parse('${Config.baseUrl}/albums/${widget.album['id']}/photos'),
       );
       setState(() {
@@ -49,29 +64,34 @@ class _AlbumDetailScreenState extends State<AlbumDetailScreen> {
 
   Future<void> _like(String id) async {
     try {
-      await http.post(Uri.parse('${Config.baseUrl}/album_photos/$id/like'));
+      await ApiClient.post(Uri.parse('${Config.baseUrl}/album_photos/$id/like'));
       await _load();
     } catch (e) { debugPrint('錯誤：$e'); }
   }
 
   Future<void> _deletePhoto(String id) async {
     try {
-      await http.delete(Uri.parse('${Config.baseUrl}/album_photos/$id'));
+      await ApiClient.delete(Uri.parse('${Config.baseUrl}/album_photos/$id'));
       await _load();
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('照片已刪除')));
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(LanguageService.t('photo_deleted'))));
       }
     } catch (e) {
       debugPrint('錯誤：$e');
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('刪除失敗：$e')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('${LanguageService.t('del_fail')}: $e')));
       }
     }
   }
 
   Future<void> _pickAndUpload() async {
+    // 未登入先彈出登入對話框
+    if (!AuthService.isLoggedIn) {
+      final ok = await LoginDialog.show(context);
+      if (!ok || !mounted) return;
+    }
     final picker = ImagePicker();
     final picked = await picker.pickImage(
       source: ImageSource.gallery,
@@ -83,20 +103,21 @@ class _AlbumDetailScreenState extends State<AlbumDetailScreen> {
     final caption = await showDialog<String>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('照片說明'),
+        title: Text(LanguageService.t('photo_caption')),
         content: TextField(
           controller: captionCtrl,
-          decoration: const InputDecoration(hintText: '輸入說明（可略）'),
+          decoration:
+              InputDecoration(hintText: LanguageService.t('caption_hint')),
           autofocus: true,
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, ''),
-            child: const Text('略過'),
+            child: Text(LanguageService.t('skip')),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, captionCtrl.text.trim()),
-            child: const Text('確認'),
+            child: Text(LanguageService.t('confirm')),
           ),
         ],
       ),
@@ -106,6 +127,7 @@ class _AlbumDetailScreenState extends State<AlbumDetailScreen> {
     final uri = Uri.parse(
         '${Config.baseUrl}/albums/${widget.album['id']}/photos');
     final request = http.MultipartRequest('POST', uri);
+    request.headers.addAll(AuthService.authHeader);
     request.fields['sender'] = _username;
     request.fields['caption'] = caption;
 
@@ -123,7 +145,7 @@ class _AlbumDetailScreenState extends State<AlbumDetailScreen> {
         await _load();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('照片上傳成功')),
+            SnackBar(content: Text(LanguageService.t('photo_uploaded'))),
           );
         }
       } else {
@@ -133,7 +155,8 @@ class _AlbumDetailScreenState extends State<AlbumDetailScreen> {
       debugPrint('錯誤：$e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('上傳失敗：$e')),
+          SnackBar(
+              content: Text('${LanguageService.t('msg_upload_fail')}: $e')),
         );
       }
     }
@@ -164,9 +187,10 @@ class _AlbumDetailScreenState extends State<AlbumDetailScreen> {
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                   child: Row(children: [
-                    Icon(Icons.favorite, color: Colors.red.shade400, size: 18),
+                    Icon(Icons.favorite, color: _heartColor((photo['likes'] ?? 0) as int), size: 18),
                     const SizedBox(width: 4),
-                    Text('${photo['likes'] ?? 0} 個讚'),
+                    Text(LanguageService.tp(
+                        'likes_count', {'n': '${photo['likes'] ?? 0}'})),
                     const Spacer(),
                     Text(photo['sender'] ?? '',
                         style: TextStyle(
@@ -179,7 +203,7 @@ class _AlbumDetailScreenState extends State<AlbumDetailScreen> {
                       Navigator.pop(context);
                       _like(photo['id'].toString());
                     },
-                    child: const Text('♥ 點讚'),
+                    child: Text(LanguageService.t('like_btn')),
                   ),
                   TextButton(
                     onPressed: () {
@@ -188,7 +212,7 @@ class _AlbumDetailScreenState extends State<AlbumDetailScreen> {
                           url: photo['url'] ?? '',
                           caption: photo['caption'] ?? '');
                     },
-                    child: const Text('分享'),
+                    child: Text(LanguageService.t('share')),
                   ),
                   if (isMine)
                     TextButton(
@@ -197,11 +221,11 @@ class _AlbumDetailScreenState extends State<AlbumDetailScreen> {
                         Navigator.pop(context);
                         await _deletePhoto(photo['id'].toString());
                       },
-                      child: const Text('刪除'),
+                      child: Text(LanguageService.t('delete')),
                     ),
                   TextButton(
                     onPressed: () => Navigator.pop(context),
-                    child: const Text('關閉'),
+                    child: Text(LanguageService.t('close')),
                   ),
                 ]),
               ]),
@@ -217,7 +241,7 @@ class _AlbumDetailScreenState extends State<AlbumDetailScreen> {
     final album = widget.album;
     return Scaffold(
       appBar: AppBar(
-        title: Text(album['title'] ?? '相簿'),
+        title: Text(album['title'] ?? LanguageService.t('nav_gallery')),
         actions: [
           IconButton(icon: const Icon(Icons.refresh), onPressed: _load),
         ],
@@ -232,14 +256,14 @@ class _AlbumDetailScreenState extends State<AlbumDetailScreen> {
                     const Icon(Icons.photo_library_outlined,
                         size: 64, color: Colors.grey),
                     const SizedBox(height: 12),
-                    const Text('還沒有照片',
+                    Text(LanguageService.t('no_photos'),
                         style:
                             TextStyle(color: Colors.grey, fontSize: 16)),
                     const SizedBox(height: 16),
                     FilledButton.icon(
                       onPressed: _pickAndUpload,
                       icon: const Icon(Icons.add_photo_alternate),
-                      label: const Text('新增第一張'),
+                      label: Text(LanguageService.t('add_first_photo')),
                     ),
                   ]))
               : RefreshIndicator(
@@ -273,7 +297,7 @@ class _AlbumDetailScreenState extends State<AlbumDetailScreen> {
                                     begin: Alignment.bottomCenter,
                                     end: Alignment.topCenter,
                                     colors: [
-                                      Colors.black.withOpacity(0.6),
+                                      Colors.black.withValues(alpha: 0.6),
                                       Colors.transparent,
                                     ],
                                   ),
@@ -294,8 +318,8 @@ class _AlbumDetailScreenState extends State<AlbumDetailScreen> {
                                     onTap: () => _like(p['id'].toString()),
                                     behavior: HitTestBehavior.opaque,
                                     child: Row(children: [
-                                      const Icon(Icons.favorite,
-                                          color: Colors.red, size: 16),
+                                      Icon(Icons.favorite,
+                                          color: _heartColor((p['likes'] ?? 0) as int), size: 16),
                                       const SizedBox(width: 3),
                                       Text('${p['likes'] ?? 0}',
                                           style: const TextStyle(
@@ -341,12 +365,11 @@ class _PhotoImage extends StatelessWidget {
       fit: BoxFit.cover,
       errorBuilder: (_, __, ___) => Container(
         color: Colors.grey.shade200,
-        child: const Icon(Icons.broken_image_outlined, color: Colors.grey),
+        child: const Icon(Icons.image_not_supported_outlined, color: Colors.grey),
       ),
       loadingBuilder: (_, child, progress) => progress == null
           ? child
-          : const Center(
-              child: CircularProgressIndicator(strokeWidth: 2)),
+          : const Center(child: CircularProgressIndicator(strokeWidth: 2)),
     );
   }
 }
