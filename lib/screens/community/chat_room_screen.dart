@@ -7,6 +7,8 @@ import 'package:share_plus/share_plus.dart';
 import '../../config.dart';
 import '../../services/language_service.dart';
 import '../../services/user_service.dart';
+import '../../services/moderation_service.dart';
+import '../../widgets/report_dialog.dart';
 import 'room_photos_screen.dart';
 
 class ChatRoomScreen extends StatefulWidget {
@@ -255,6 +257,43 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                   _showEditDialog(msg);
                 },
               ),
+            if (!isMine) ...[
+              _MenuItem(
+                icon: Icons.flag_outlined,
+                label: LanguageService.t('report'),
+                onTap: () {
+                  Navigator.pop(context);
+                  showReportDialog(
+                    context,
+                    targetType: 'message',
+                    targetId: (msg['id'] ?? '').toString(),
+                    targetOwner: msg['sender'] ?? '',
+                  );
+                },
+              ),
+              _MenuItem(
+                icon: Icons.block,
+                label: '${LanguageService.t('block')} ${msg['sender'] ?? ''}',
+                onTap: () async {
+                  Navigator.pop(context);
+                  final name = msg['sender'] ?? '';
+                  if (name.isEmpty) return;
+                  try {
+                    await ModerationService.block(name);
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                          content: Text(
+                              '${LanguageService.t('blocked_ok')}：$name')));
+                    }
+                  } catch (e) {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('$e')));
+                    }
+                  }
+                },
+              ),
+            ],
             const SizedBox(height: 8),
           ],
         ),
@@ -361,35 +400,43 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
           // ── Messages tab ──
           Column(children: [
             Expanded(
-              child: _messages.isEmpty
-                  ? Center(
-                      child: Text(LanguageService.t('no_messages'),
-                          style: const TextStyle(color: Colors.grey)))
-                  : ListView.builder(
-                      controller: _scroll,
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 8),
-                      itemCount: _messages.length,
-                      itemBuilder: (_, i) {
-                        final m = _messages[i];
-                        final isMine = m['sender'] == _username;
-                        return GestureDetector(
-                          onLongPress: () => _onLongPress(m),
-                          child: _Bubble(
-                            sender: m['sender'] ?? '匿名',
-                            text: m['text'] ?? '',
-                            time: (m['created_at'] ?? '').toString().length >=
-                                    16
-                                ? (m['created_at'] as String)
-                                    .substring(11, 16)
-                                : '',
-                            isMine: isMine,
-                            edited: m['edited'] == true,
-                            replyTo: m['reply_to'],
-                          ),
-                        );
-                      },
-                    ),
+              child: ValueListenableBuilder<Set<String>>(
+                valueListenable: ModerationService.blocked,
+                builder: (_, __, ___) {
+                  // 隱藏被封鎖使用者的訊息
+                  final visible = _messages
+                      .where((m) => !ModerationService.isBlocked(m['sender']))
+                      .toList();
+                  if (visible.isEmpty) {
+                    return Center(
+                        child: Text(LanguageService.t('no_messages'),
+                            style: const TextStyle(color: Colors.grey)));
+                  }
+                  return ListView.builder(
+                    controller: _scroll,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 8),
+                    itemCount: visible.length,
+                    itemBuilder: (_, i) {
+                      final m = visible[i];
+                      final isMine = m['sender'] == _username;
+                      return GestureDetector(
+                        onLongPress: () => _onLongPress(m),
+                        child: _Bubble(
+                          sender: m['sender'] ?? '匿名',
+                          text: m['text'] ?? '',
+                          time: (m['created_at'] ?? '').toString().length >= 16
+                              ? (m['created_at'] as String).substring(11, 16)
+                              : '',
+                          isMine: isMine,
+                          edited: m['edited'] == true,
+                          replyTo: m['reply_to'],
+                        ),
+                      );
+                    },
+                  );
+                },
+              ),
             ),
             // Reply preview bar
             if (_replyTo != null) _ReplyBar(

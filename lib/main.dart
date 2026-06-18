@@ -3,6 +3,7 @@ import 'app.dart';
 import 'services/auth_service.dart';
 import 'services/background_service.dart';
 import 'services/language_service.dart';
+import 'services/moderation_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -11,5 +12,8 @@ void main() async {
     AuthService.load(),
   ]);
   await LanguageService.load(); // 需在 AuthService 之後（依帳號讀取自訂語言）
+  await ModerationService.load(); // 載入封鎖名單（依登入帳號）
+  // 登入/登出時重新載入封鎖名單
+  AuthService.notifier.addListener(ModerationService.load);
   runApp(const RIdIngApp());
 }

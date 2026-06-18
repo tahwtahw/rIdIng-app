@@ -7,6 +7,7 @@ import '../../config.dart';
 import '../../services/auth_service.dart';
 import '../../services/language_service.dart';
 import '../../services/user_service.dart';
+import '../../widgets/report_dialog.dart';
 import '../../utils/photo_actions.dart';
 import '../../widgets/login_dialog.dart';
 
@@ -292,6 +293,19 @@ class _RoomPhotosScreenState extends State<RoomPhotosScreen> {
                     },
                     child: Text(LanguageService.t('share')),
                   ),
+                  if (!isMine)
+                    TextButton(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        showReportDialog(
+                          context,
+                          targetType: 'photo',
+                          targetId: (photo['id'] ?? '').toString(),
+                          targetOwner: photo['sender'] ?? '',
+                        );
+                      },
+                      child: Text(LanguageService.t('report')),
+                    ),
                   if (isMine)
                     TextButton(
                       style: TextButton.styleFrom(foregroundColor: Colors.red),

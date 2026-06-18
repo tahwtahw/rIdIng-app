@@ -106,6 +106,23 @@ class AuthService {
     notifier.value = null;
   }
 
+  /// 刪除目前帳號：呼叫後端刪除後，清除本機登入狀態
+  static Future<void> deleteAccount() async {
+    final token = notifier.value?.token;
+    if (token != null && token.isNotEmpty) {
+      final res = await ApiClient.delete(
+        Uri.parse('${Config.baseUrl}/account'),
+        headers: {'Authorization': 'Bearer $token'},
+      );
+      if (res.statusCode != 200) {
+        throw Exception('刪除失敗 (${res.statusCode})');
+      }
+    }
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_kToken);
+    notifier.value = null;
+  }
+
   static Future<void> _save(AuthUser user) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_kToken, user.token);

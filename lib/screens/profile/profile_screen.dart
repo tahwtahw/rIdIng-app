@@ -9,6 +9,7 @@ import '../../services/background_service.dart';
 import '../../services/language_service.dart';
 import '../../services/user_service.dart';
 import '../../widgets/login_dialog.dart';
+import 'blocked_list_screen.dart';
 
 const _kSwatches = <Color>[
   Color(0xFFFFFFFF),
@@ -167,6 +168,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
               child: Text(LanguageService.t('save'))),
         ]),
         const Divider(height: 24),
+
+        // ── 已封鎖名單 ───────────────────────────────────────────────
+        Card(
+          margin: EdgeInsets.zero,
+          child: ListTile(
+            leading: const Icon(Icons.block),
+            title: Text(LanguageService.t('blocked_list')),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const BlockedListScreen()),
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
 
         // ── 背景設定（可收合）─────────────────────────────────────────
         Card(
@@ -444,40 +460,83 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (user != null) {
       return Card(
         margin: EdgeInsets.zero,
-        child: ListTile(
-          leading: CircleAvatar(
-            backgroundColor: theme.colorScheme.primaryContainer,
-            child: Text(
-              user.username.isNotEmpty ? user.username[0].toUpperCase() : '?',
-              style: TextStyle(color: theme.colorScheme.onPrimaryContainer),
+        child: Column(children: [
+          ListTile(
+            leading: CircleAvatar(
+              backgroundColor: theme.colorScheme.primaryContainer,
+              child: Text(
+                user.username.isNotEmpty ? user.username[0].toUpperCase() : '?',
+                style: TextStyle(color: theme.colorScheme.onPrimaryContainer),
+              ),
+            ),
+            title: Text(user.username,
+                style: const TextStyle(fontWeight: FontWeight.bold)),
+            subtitle: Text(user.email,
+                style: const TextStyle(fontSize: 12)),
+            trailing: TextButton(
+              onPressed: () async {
+                final confirm = await showDialog<bool>(
+                  context: context,
+                  builder: (_) => AlertDialog(
+                    title: Text(LanguageService.t('logout')),
+                    content: const Text('確定要登出嗎？'),
+                    actions: [
+                      TextButton(
+                          onPressed: () => Navigator.pop(context, false),
+                          child: Text(LanguageService.t('cancel'))),
+                      FilledButton(
+                          onPressed: () => Navigator.pop(context, true),
+                          child: Text(LanguageService.t('logout'))),
+                    ],
+                  ),
+                );
+                if (confirm == true) await AuthService.logout();
+              },
+              child: Text(LanguageService.t('logout')),
             ),
           ),
-          title: Text(user.username,
-              style: const TextStyle(fontWeight: FontWeight.bold)),
-          subtitle: Text(user.email,
-              style: const TextStyle(fontSize: 12)),
-          trailing: TextButton(
-            onPressed: () async {
-              final confirm = await showDialog<bool>(
-                context: context,
-                builder: (_) => AlertDialog(
-                  title: Text(LanguageService.t('logout')),
-                  content: const Text('確定要登出嗎？'),
-                  actions: [
-                    TextButton(
-                        onPressed: () => Navigator.pop(context, false),
-                        child: const Text('取消')),
-                    FilledButton(
-                        onPressed: () => Navigator.pop(context, true),
-                        child: Text(LanguageService.t('logout'))),
-                  ],
-                ),
-              );
-              if (confirm == true) await AuthService.logout();
-            },
-            child: Text(LanguageService.t('logout')),
+          const Divider(height: 1),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: () async {
+                final confirm = await showDialog<bool>(
+                  context: context,
+                  builder: (_) => AlertDialog(
+                    title: Text(LanguageService.t('delete_account')),
+                    content: Text(LanguageService.t('delete_account_confirm')),
+                    actions: [
+                      TextButton(
+                          onPressed: () => Navigator.pop(context, false),
+                          child: Text(LanguageService.t('cancel'))),
+                      FilledButton(
+                          style: FilledButton.styleFrom(
+                              backgroundColor: theme.colorScheme.error),
+                          onPressed: () => Navigator.pop(context, true),
+                          child: Text(LanguageService.t('delete_account'))),
+                    ],
+                  ),
+                );
+                if (confirm != true) return;
+                try {
+                  await AuthService.deleteAccount();
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                        content: Text(LanguageService.t('account_deleted'))));
+                  }
+                } catch (e) {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                        content: Text('${LanguageService.t('delete_fail')}：$e')));
+                  }
+                }
+              },
+              icon: Icon(Icons.delete_forever, color: theme.colorScheme.error),
+              label: Text(LanguageService.t('delete_account'),
+                  style: TextStyle(color: theme.colorScheme.error)),
+            ),
           ),
-        ),
+        ]),
       );
     }
     return Card(
